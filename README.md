@@ -1,2 +1,2 @@
 # GPT-From-Scratch
-Road to GPT 2
+Implementing the the GPT 2 architecture from scratch.
