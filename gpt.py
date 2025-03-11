@@ -53,19 +53,28 @@ class Head(nn.Module):
         wei = F.softmax(wei,dim=-1)
         out = wei @ v
         return out
+class MultiHeadAttention(nn.Module):
+    def __init__(self, n_heads,head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for i in range(n_heads)])
+    def forward(self,x):
+        return torch.cat([h(x) for h in self.heads],dim=-1)
+
+
+
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size,n_embed)
         self.position_embedding_table = nn.Embedding(block_size,n_embed)
         self.lm_head = nn.Linear(n_embed,vocab_size)
-        self.sa_head = Head(n_embed)
+        self.sa_heads = MultiHeadAttention(4,n_embed//4)
     def forward(self, idx,target=None):
         B,T = idx.shape
         tok_embed = self.token_embedding_table(idx)
         pos_embed = self.position_embedding_table(torch.arange(T,device=device))
         x = tok_embed + pos_embed
-        x = self.sa_head(x)
+        x = self.sa_heads(x)
         logits = self.lm_head(x)
         if target == None:
             loss = None
