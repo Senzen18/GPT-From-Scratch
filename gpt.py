@@ -3,14 +3,17 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.optim import AdamW
 
-block_size = 8
-batch_size = 32
+block_size = 256
+batch_size = 64
 max_iter = 5000
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_interval = 500
 eval_iter = 200
-n_embed = 32
+n_embed = 384
 learning_rate = 1e-3
+dropout = 0.2
+n_heads = 6
+n_layers = 6
 
 
 text = ''
@@ -35,12 +38,27 @@ def get_batch(split):
     xb = torch.stack([train_data[i:i+block_size] for i in ix])
     yb = torch.stack([train_data[i+1:i+block_size+1] for i in ix])
     return xb.to(device),yb.to(device)
+class Block(nn.Module):
+    def __init__(self,n_embed,n_heads):
+        super().__init__()
+        head_size = n_embed // n_heads
+        self.sa = MultiHeadAttention(n_heads,head_size)
+        self.ffwd = FeedForward(n_embed)
+        self.ln1 = nn.LayerNorm(n_embed)
+        self.ln2 = nn.LayerNorm(n_embed)
+
+    def forward(self,x):
+        x = x + self.sa(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
+        return x
 class FeedForward(nn.Module):
     def __init__(self,n_embed):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_embed,n_embed),
+            nn.Linear(n_embed,4 * n_embed),
             nn.ReLU(),
+            nn.Linear(4 * n_embed,n_embed),
+            nn.Dropout(dropout)
         )
     def forward(self,x):
         return self.net(x)
@@ -66,8 +84,13 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, n_heads,head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for i in range(n_heads)])
+        self.proj = nn.Linear(n_embed,n_embed)
+        self.dropout = nn.Dropout(dropout)
     def forward(self,x):
-        return torch.cat([h(x) for h in self.heads],dim=-1)
+        out = torch.cat([h(x) for h in self.heads],dim=-1)
+        out = self.proj(out)
+        out = self.dropout(out)
+        return out
 
 
 
@@ -77,15 +100,19 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size,n_embed)
         self.position_embedding_table = nn.Embedding(block_size,n_embed)
         self.lm_head = nn.Linear(n_embed,vocab_size)
-        self.sa_heads = MultiHeadAttention(4,n_embed//4)
-        self.ffwd = FeedForward(n_embed)
+        #self.sa_heads = MultiHeadAttention(4,n_embed//4)
+        #self.ffwd = FeedForward(n_embed)
+        self.blocks = nn.Sequential(*[Block(n_embed,n_heads) for _ in range(n_layers)])
+        self.ln_f = nn.LayerNorm(n_embed)
     def forward(self, idx,target=None):
         B,T = idx.shape
         tok_embed = self.token_embedding_table(idx)
         pos_embed = self.position_embedding_table(torch.arange(T,device=device))
         x = tok_embed + pos_embed
-        x = self.sa_heads(x)
-        x = self.ffwd(x)
+        #x = self.sa_heads(x)
+        #x = self.ffwd(x)
+        x = self.blocks(x)
+        x = self.ln_f(x)
         logits = self.lm_head(x)
         if target == None:
             loss = None
