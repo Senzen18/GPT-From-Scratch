@@ -35,6 +35,15 @@ def get_batch(split):
     xb = torch.stack([train_data[i:i+block_size] for i in ix])
     yb = torch.stack([train_data[i+1:i+block_size+1] for i in ix])
     return xb.to(device),yb.to(device)
+class FeedForward(nn.Module):
+    def __init__(self,n_embed):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embed,n_embed),
+            nn.ReLU(),
+        )
+    def forward(self,x):
+        return self.net(x)
 class Head(nn.Module):
     def __init__(self,head_size):
         super().__init__()
@@ -69,12 +78,14 @@ class BigramLanguageModel(nn.Module):
         self.position_embedding_table = nn.Embedding(block_size,n_embed)
         self.lm_head = nn.Linear(n_embed,vocab_size)
         self.sa_heads = MultiHeadAttention(4,n_embed//4)
+        self.ffwd = FeedForward(n_embed)
     def forward(self, idx,target=None):
         B,T = idx.shape
         tok_embed = self.token_embedding_table(idx)
         pos_embed = self.position_embedding_table(torch.arange(T,device=device))
         x = tok_embed + pos_embed
         x = self.sa_heads(x)
+        x = self.ffwd(x)
         logits = self.lm_head(x)
         if target == None:
             loss = None
